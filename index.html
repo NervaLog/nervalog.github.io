@@ -371,7 +371,7 @@ const PRODUCTION = [
    demo:[["","# two client processes, each with nerva api on 127.0.0.1; one gateway killed: only its client stops"],["","# 32 callers against a 16-slot gateway"],["","{\"error\":\"busy\",\"applied\":false}                    (503)"],["","# two gateways, one killed: retries land on the other, under their keys"]]},
   {id:"R5", name:"Recover", status:"wip", gate:true,
    goal:"A replica whose disk is gone rejoins by state sync with the cluster open, and a backup restores to the same view hashes.",
-   note:"Slices 1 to 3 of 7 merged (#150, #151, #152): every command failure has a code, start refuses a bad data file before it can panic, and nerva recover rebuilds a lost replica of a formatted cluster with writes continuing. Still to come: imported clusters, backup, restore and demo-r5.",
+   note:"Slices 1 to 4 and 6 of 7 merged (#150, #151, #152, #154, #157): every command failure has a code, start refuses a bad data file before it can panic, nerva recover rebuilds a lost replica of a formatted or an imported cluster with writes continuing, and nerva backup and restore check a manifest before any data file exists. Still to come: the VOPR from an imported start and demo-r5.",
    demo:[["$","rm data/2.nerva && nerva recover --replica=2 …"],["","# writes continue; replica 2 catches up; every view hash agrees"],["$","nerva backup … && nerva restore …"],["","# the manifest's op, SHA-256 and view hashes match before it opens"]]},
   {id:"R6", name:"Upgrade", status:"plan", gate:false,
    goal:"A release that keeps the data format upgrades one replica at a time, with the cluster taking writes.",
