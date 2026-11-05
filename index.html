@@ -288,7 +288,7 @@ footer .wrap{display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap}
 // Every status here must be traceable to README.md (Roadmap), docs/GOALS-1.0.md or CHANGELOG.md.
 // A release: add it to RELEASES (newest first) from its CHANGELOG section, and set SITE.version.
 const SITE = {
-  updated: "2026-11-04",
+  updated: "2026-11-05",
   repo: "https://github.com/NervaLog/nerva",
   version: "0.6.1",
   released: "2026-10-21",
@@ -369,10 +369,11 @@ const PRODUCTION = [
    goal:"A gateway runs beside the process it serves, on loopback, never as a shared hop; its client can always tell \"not applied\" from \"unknown\", and it reports what it does.",
    note:"Today Botpike reaches gateways beside the replicas over the network. #120: a busy gateway can close a request mid-send. No gateway metrics.",
    demo:[["","# two client processes, each with nerva api on 127.0.0.1; one gateway killed: only its client stops"],["","# 32 callers against a 16-slot gateway"],["","{\"error\":\"busy\",\"applied\":false}                    (503)"],["","# two gateways, one killed: retries land on the other, under their keys"]]},
-  {id:"R5", name:"Recover", status:"wip", gate:true,
+  {id:"R5", name:"Recover", status:"done", gate:true,
    goal:"A replica whose disk is gone rejoins by state sync with the cluster open, and a backup restores to the same view hashes.",
-   note:"Slices 1 to 6 of 7 merged (#150, #151, #152, #154, #157, #159): every command failure has a code, start refuses a bad data file before it can panic, nerva recover rebuilds a lost replica of a formatted or an imported cluster with writes continuing, nerva backup and restore check a manifest before any data file exists, and the VOPR starts half its seeds from an imported checkpoint. Still to come: demo-r5.",
-   demo:[["$","rm data/2.nerva && nerva recover --replica=2 …"],["","# writes continue; replica 2 catches up; every view hash agrees"],["$","nerva backup … && nerva restore …"],["","# the manifest's op, SHA-256 and view hashes match before it opens"]]},
+   note:"Delivered 2026-11-05: demo-r5 green in CI on main. nerva recover rebuilds a lost replica of a formatted or imported cluster while writes continue; nerva backup and restore check a manifest before any data file exists; every command failure has a code; the VOPR starts half its seeds from an imported checkpoint.",
+   recorded:{url:"https://github.com/NervaLog/nerva/actions/runs/41997293568/job/127143488126", date:"2026-11-05"},
+   demo:[["","step 3: replica 2 killed (SIGKILL) and its data file deleted; the writer went on (35 more commits)"],["","step 4: recover for replica 1 refused: error[NRV-E0713]: replica 1 still answers at 127.0.0.1:58505"],["","step 5: recover: replica 2 of cluster 0 formatted at view 3 (the cluster was at view 1)"],["","step 6: replica 2 started: sync: done in its log, replica_commit_min 5299 against 3419 and 3384"],["","step 7: replicas restarted in turn: [0, 1]; the replica_view gauge is 5, so replica 2 leads"],["","step 8: writer stopped at op 9018 (8047 commits); nerva api and nerva view agree; 8047 keys replayed with their ops"],["","step 9: backup at op 17404, sha256 60bac0deb792; the manifest's view hashes and ledger total equal step 8's"],["","step 11: cluster 0 stopped and its data files deleted; three replicas restored: every view hash and the ledger total equal the manifest's"],["","step 12: restore from a backup with one byte changed refused: error[NRV-E0804] ... a record's CRC-32 does not match"],["","demo-r5: PASS"]]},
   {id:"R6", name:"Upgrade", status:"plan", gate:false,
    goal:"A release that keeps the data format upgrades one replica at a time, with the cluster taking writes.",
    note:"Today every upgrade is an export and import with the cluster closed, about 14 s per million changes.",
@@ -435,7 +436,7 @@ $("#production-link").href = BLOB + "docs/PRODUCTION.md";
 $("#r-milestones").innerHTML = PRODUCTION.map(r=>`
   <article class="ms" id="${r.id.toLowerCase()}">
     <div class="meta"><span class="code">${r.id}${r.gate?" · launch gate":""}</span><h3>${esc(r.name)}</h3><p>${esc(r.goal)}</p><span class="pill s-${r.status}">${label[r.status]}</span><span class="slices">${esc(r.note)}</span></div>
-    <div class="term"><div class="bar"><span>demo-${r.id.toLowerCase()}</span><span class="planned">planned</span></div><pre>${termHTML(r.demo)}</pre></div>
+    <div class="term"><div class="bar"><span>demo-${r.id.toLowerCase()}</span>${r.recorded?`<a class="rec" href="${r.recorded.url}">✓ recorded in CI · ${r.recorded.date}</a>`:'<span class="planned">planned</span>'}</div><pre>${termHTML(r.demo)}</pre></div>
   </article>`).join("");
 $("#next-list").innerHTML = NEXT.map(n=>`<div class="item"><div class="head"><span class="code">${esc(n.ref)}</span><h3>${esc(n.t)}</h3><span class="pill s-${n.status}">${label[n.status]}</span></div><p>${esc(n.d)}</p></div>`).join("");
 $("#release-list").innerHTML = RELEASES.map(r=>`<li><span class="v"><a href="${SITE.repo}/releases/tag/v${r.v}">v${r.v}</a><small>${r.date}</small></span><p>${esc(r.d)}</p></li>`).join("");
