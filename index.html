@@ -367,7 +367,7 @@ const PRODUCTION = [
    demo:[["$","perf/fly/run.sh --topology 3+1"],["","# p50, p99, p99.9 with checkpoints marked; a sizing table by working set"],["$","nerva start --cache-grid=8GiB …   # on a 4 GB machine"],["","# refused at start, naming the flag, instead of killed later"]]},
   {id:"R4", name:"Gateway", status:"plan", gate:true,
    goal:"A gateway runs beside the process it serves, on loopback, never as a shared hop; its client can always tell \"not applied\" from \"unknown\", and it reports what it does.",
-   note:"Today Botpike reaches gateways beside the replicas over the network. #120: a busy gateway can close a request mid-send. No gateway metrics.",
+   note:"Brief written (docs/briefs/r4.md, awaiting the owner): every reply says whether a write was applied (false) or may have been (unknown), within a stated bound; busy and slow requests answered instead of cut (#120); one gateway per port (#112); statsd metrics; loopback by default. Seven slices ending in demo-r4.",
    demo:[["","# two client processes, each with nerva api on 127.0.0.1; one gateway killed: only its client stops"],["","# 32 callers against a 16-slot gateway"],["","{\"error\":\"busy\",\"applied\":false}                    (503)"],["","# two gateways, one killed: retries land on the other, under their keys"]]},
   {id:"R5", name:"Recover", status:"done", gate:true,
    goal:"A replica whose disk is gone rejoins by state sync with the cluster open, and a backup restores to the same view hashes.",
