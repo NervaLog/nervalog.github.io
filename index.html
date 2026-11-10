@@ -353,9 +353,9 @@ const NEXT = [
 // Production readiness, from docs/PRODUCTION.md. status as for GOALS; gate: part of the launch gate.
 // demo: the milestone's demo script, planned until it runs (shown with the "planned" badge).
 const PRODUCTION = [
-  {id:"R1", name:"Proven", status:"plan", gate:true,
+  {id:"R1", name:"Proven", status:"wip", gate:true,
    goal:"Jepsen every night on a dedicated host, on what the client actually does: keyed commits under lost replies, gateways killed and cut off.",
-   note:"The bank suite exists and ran once by hand (v0.4.0). Nightly is draft #106; #107 was the runner's memory.",
+   note:"The retry, bank-keys and gateway workloads and the nightly workflow are merged and run on GitHub-hosted runners; the dedicated host is not provisioned yet.",
    demo:[["$","tests/jepsen/run.sh zig-out/bin/nerva test --workload retry \\"],["","    --nemesis kill,partition,gateway --time-limit 3600"],["","# each key commits at most once; a retry names the original op"],["$","tests/jepsen/run.sh … --workload bank --keys"],["","# conservation holds; a build without key dedup is caught"]]},
   {id:"R2", name:"Fleet", status:"wip", gate:true,
    goal:"The VOPR and the fuzzers run around the clock on Hetzner, and every new failure becomes one issue with its replay command.",
