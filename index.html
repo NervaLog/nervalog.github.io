@@ -288,11 +288,11 @@ footer .wrap{display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap}
 // Every status here must be traceable to README.md (Roadmap), docs/GOALS-1.0.md or CHANGELOG.md.
 // A release: add it to RELEASES (newest first) from its CHANGELOG section, and set SITE.version.
 const SITE = {
-  updated: "2026-11-05",
+  updated: "2026-11-10",
   repo: "https://github.com/NervaLog/nerva",
-  version: "0.6.1",
-  released: "2026-10-21",
-  stage: "Research · v0.6.1 released",
+  version: "0.7.0",
+  released: "2026-11-10",
+  stage: "Research · v0.7.0 released",
   stageStatus: "plan", // the header pill: "done" | "wip" | "plan"
 };
 const BLOB = SITE.repo + "/blob/main/";
@@ -390,6 +390,7 @@ const PRODUCTION = [
 ];
 // From CHANGELOG.md, newest first. Each links to its GitHub release.
 const RELEASES = [
+  {v:"0.7.0", date:"2026-11-10", d:"nerva recover replaces a lost replica with the cluster open; backup and restore with a separate record (R5). A gateway per client on loopback, with metrics (R4). Every failure has a stable NRV code. Replicas upgrade in place."},
   {v:"0.6.1", date:"2026-10-21", d:"nerva api keeps table layouts between requests: about 3.5 times the submits per second through one gateway. nerva start gains --commit-stall-probability."},
   {v:"0.6.0", date:"2026-10-16", d:"Facts beside the money: commit keys, records with 128-bit ids, and declared indexes. Data files move by export and import."},
   {v:"0.5.0", date:"2026-10-07", d:"Replicas prove to each other that they hold a cluster key; gateway keys rotate without downtime; gateways listen on IPv6."},
