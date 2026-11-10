@@ -292,8 +292,8 @@ const SITE = {
   repo: "https://github.com/NervaLog/nerva",
   version: "0.7.0",
   released: "2026-11-10",
-  stage: "Research · v0.7.0 released",
-  stageStatus: "plan", // the header pill: "done" | "wip" | "plan"
+  stage: "Research · v0.7.0 released · v0.7.1 alpha in progress",
+  stageStatus: "wip", // the header pill: "done" | "wip" | "plan"
 };
 const BLOB = SITE.repo + "/blob/main/";
 const TUTORIAL = BLOB + "docs/TUTORIAL.md";
@@ -343,6 +343,7 @@ const GOALS = [
 ];
 // "Coming next", from README.md's Roadmap and docs/GOALS-1.0.md; ref is a goal id or roadmap item.
 const NEXT = [
+  {ref:"v0.7.1", t:"Alpha: the first release for outside users", status:"wip", d:"The candidate soaks in the simulator fleet and nightly Jepsen on a frozen commit; a signed, notarized universal macOS binary with a Homebrew tap; a Linux tarball with install.sh and systemd units, and .deb and .rpm packages; docs written for someone who is not us."},
   {ref:"Milestone 7", t:"First production use", status:"wip", d:"The first application's ledger on commit keys, then its facts as records, step by step (GOALS-1.0, milestone 7)."},
   {ref:"Roadmap 6", t:"Past index reads and retention", status:"plan", d:"Index reads as of a past op, group_by on bytes fields, and retention of commit keys and facts."},
   {ref:"Roadmap 5", t:"View snapshots", status:"plan", d:"Reads as of any op and change cursors exist; view snapshots are the part of subscriptions still to come."},
@@ -377,7 +378,7 @@ const PRODUCTION = [
    demo:[["","step 3: replica 2 killed (SIGKILL) and its data file deleted; the writer went on (35 more commits)"],["","step 4: recover for replica 1 refused: error[NRV-E0713]: replica 1 still answers at 127.0.0.1:58505"],["","step 5: recover: replica 2 of cluster 0 formatted at view 3 (the cluster was at view 1)"],["","step 6: replica 2 started: sync: done in its log, replica_commit_min 5299 against 3419 and 3384"],["","step 7: replicas restarted in turn: [0, 1]; the replica_view gauge is 5, so replica 2 leads"],["","step 8: writer stopped at op 9018 (8047 commits); nerva api and nerva view agree; 8047 keys replayed with their ops"],["","step 9: backup at op 17404, sha256 60bac0deb792; the manifest's view hashes and ledger total equal step 8's"],["","step 11: cluster 0 stopped and its data files deleted; three replicas restored: every view hash and the ledger total equal the manifest's"],["","step 12: restore from a backup with one byte changed refused: error[NRV-E0804] ... a record's CRC-32 does not match"],["","demo-r5: PASS"]]},
   {id:"R6", name:"Upgrade", status:"plan", gate:false,
    goal:"A release that keeps the data format upgrades one replica at a time, with the cluster taking writes.",
-   note:"Today every upgrade is an export and import with the cluster closed, about 14 s per million changes.",
+   note:"v0.6.1 to v0.7.0 upgrades in place, one replica at a time, replicas before gateways (P260), because the data format did not change. A release that changes the protocol still needs export and import with the cluster closed, about 14 s per million changes. Brief written (docs/briefs/r6.md).",
    demo:[["","# three replicas on N under load; each replaced in turn by N+1"],["","# no request fails except as retried under its key; hashes agree"]]},
   {id:"R7", name:"Retention", status:"plan", gate:false,
    goal:"Commit keys, history and view versions are kept for a declared horizon, then trimmed: disk, export and import stay bounded.",
