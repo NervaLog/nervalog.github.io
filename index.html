@@ -343,13 +343,13 @@ const GOALS = [
 ];
 // "Coming next", from README.md's Roadmap and docs/GOALS-1.0.md; ref is a goal id or roadmap item.
 const NEXT = [
-  {ref:"v0.7.1", t:"Alpha: the first release for outside users", status:"wip", d:"The candidate soaks in the simulator fleet and nightly Jepsen on a frozen commit; a signed, notarized universal macOS binary with a Homebrew tap; a Linux tarball with install.sh and systemd units, and .deb and .rpm packages; docs written for someone who is not us."},
+  {ref:"v0.7.1", t:"Alpha: the first release for outside users", status:"wip", d:"The candidate soaks in the simulator fleet and nightly Jepsen on a frozen commit; a universal macOS binary signed and notarized in CI, with a Homebrew tap; a Linux tarball with install.sh and systemd units, and .deb and .rpm packages; docs written for someone who is not us."},
+  {ref:"v0.7.2", t:"Packages you can update", status:"plan", d:"apt and dnf repositories with signed packages, and the fixes held during the v0.7.1 freeze, security fixes among them."},
+  {ref:"v0.8", t:"Proven and upgradable", status:"plan", d:"R1 Jepsen nightly and R2 the fleet delivered on their own host; R6 rolling upgrades through multiversion binaries; R3 sizing and latency on three machines; a tutorial that builds a small application on Nerva."},
+  {ref:"v0.9", t:"Bounded", status:"plan", d:"R7 retention: commit keys, history and view versions trimmed below a declared horizon. Index reads as of a past op, group_by on bytes fields, and view snapshots."},
+  {ref:"v0.10", t:"Native client and effects", status:"plan", d:"R8: a C ABI and a JVM binding, with no gateway in the client's path. Effect sinks (G5) and attributed approvals (G7)."},
   {ref:"Milestone 7", t:"First production use", status:"wip", d:"The first application's ledger on commit keys, then its facts as records, step by step (GOALS-1.0, milestone 7)."},
-  {ref:"Roadmap 6", t:"Past index reads and retention", status:"plan", d:"Index reads as of a past op, group_by on bytes fields, and retention of commit keys and facts."},
-  {ref:"Roadmap 5", t:"View snapshots", status:"plan", d:"Reads as of any op and change cursors exist; view snapshots are the part of subscriptions still to come."},
-  {ref:"G5", t:"Effect sinks", status:"plan", d:"Views whose sink is an email or an API call, keyed by (view, row key, op)."},
-  {ref:"G7", t:"Attributed approvals", status:"plan", d:"An identity model, so every approval in the log names who gave it."},
-  {ref:"Roadmap 7", t:"Beyond 1.0", status:"plan", d:"Object-storage tiering and external operators (embeddings), with their outputs recorded so replays read the recording."},
+  {ref:"Beyond 1.0", t:"Tiering and operators", status:"plan", d:"Object-storage tiering and external operators (embeddings), with their outputs recorded so replays read the recording."},
 ];
 // Production readiness, from docs/PRODUCTION.md. status as for GOALS; gate: part of the launch gate.
 // demo: the milestone's demo script, planned until it runs (shown with the "planned" badge).
