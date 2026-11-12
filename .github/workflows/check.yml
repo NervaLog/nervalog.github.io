@@ -1,0 +1,42 @@
+# site-check: the status check every pull request to main waits for (docs/releases/automation.md in
+# NervaLog/nerva). The job's name is the check's name: renaming it breaks the ruleset that requires it.
+name: site-check
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  site-check:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      # Node comes with the runner image; no setup action is needed.
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          fetch-depth: 2
+          persist-credentials: false
+
+      - name: The checker's own tests
+        run: node --test .github/scripts/site_check.test.mjs
+
+      - name: The page parses and its data is well formed
+        run: node .github/scripts/site_check.mjs index.html
+
+      # The App opens `release/v<version>` branches. Such a pull request may change only the new
+      # RELEASES entry and SITE.version, SITE.released and SITE.updated. HEAD is the merge commit:
+      # HEAD^1 is the base it merges into.
+      - name: A release changes only what a release may
+        env:
+          HEAD_REF: ${{ github.head_ref }}
+        run: |
+          case "$HEAD_REF" in
+            release/v*) ;;
+            *) echo "not a release pull request"; exit 0 ;;
+          esac
+          git show HEAD^1:index.html > "$RUNNER_TEMP/base-index.html"
+          mapfile -t changed < <(git diff --name-only HEAD^1 HEAD)
+          node .github/scripts/site_check.mjs index.html --release "$RUNNER_TEMP/base-index.html" "${changed[@]}"
