@@ -2,9 +2,24 @@
 //
 //   node .github/scripts/site_check.mjs index.html
 //       index.html parses and its status data is well formed.
-//   node .github/scripts/site_check.mjs index.html --release BASE_INDEX_HTML CHANGED_FILES...
+//   node .github/scripts/site_check.mjs index.html --release BASE_INDEX_HTML [--version V] CHANGED_FILES...
 //       as above, and the page differs from BASE_INDEX_HTML only by one new RELEASES entry and
-//       SITE.version, SITE.released and SITE.updated; CHANGED_FILES is only index.html.
+//       SITE.version, SITE.released and SITE.updated; CHANGED_FILES is only index.html. With
+//       --version V the new entry's version must be V (the `release/v<V>` branch name).
+//
+// THE CONTRACT with the Nerva side (site_release.py, release_notes.sh site; NervaLog/nerva
+// docs/releases/automation.md). A release changes exactly these lines of index.html, and nothing
+// else, and each has exactly this shape, with only the value changed:
+//
+//   first line under `const RELEASES = [`:
+//     {v:"<VERSION>", date:"<YYYY-MM-DD>", d:"<sentence>"},       (two-space indent, one space
+//                                                                   after each comma, trailing comma)
+//   `  version: "<VERSION>",`   VERSION is ^\d+\.\d+\.\d+(-rc\.\d+)?$
+//   `  released: "<YYYY-MM-DD>",`   equal to the entry's date
+//   `  updated: "<YYYY-MM-DD>",`
+//
+// <sentence> is printable ASCII (0x20-0x7E) without < > & ` " or \, at most 300 characters.
+// The entry's v equals SITE.version. Do not loosen this: the page's script is code.
 //
 // Each refusal is one line starting "site-check:". Exit 1 on any, 2 on bad usage.
 import { readFileSync } from "node:fs";
@@ -14,6 +29,9 @@ import { pathToFileURL } from "node:url";
 const STATUS = ["done", "wip", "plan"];
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
 const SEMVER = /^(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?$/;
+const VERSION = /^\d+\.\d+\.\d+(-rc\.\d+)?$/;
+const SENTENCE = /^[\x20-\x7E]{1,300}$/;
+const SENTENCE_BAD = /[<>&`"\\]/;
 const DATA_END = "// ===== Rendering =====";
 
 export function extractScript(html) {
@@ -43,9 +61,20 @@ function cmpVersion(a, b) {
   if (x[4] === y[4]) return 0;
   if (x[4] === undefined) return 1; // a release is newer than its candidates
   if (y[4] === undefined) return -1;
-  return x[4] < y[4] ? -1 : 1;
+  // SemVer 11.4: numeric identifiers compare as numbers and sort below alphanumeric ones; a
+  // shorter list sorts below a longer one that starts with it.
+  const p = x[4].split("."), q = y[4].split(".");
+  for (let i = 0; i < Math.min(p.length, q.length); i++) {
+    if (p[i] === q[i]) continue;
+    const m = /^\d+$/.test(p[i]), n = /^\d+$/.test(q[i]);
+    if (m && n) return +p[i] - +q[i];
+    if (m !== n) return m ? -1 : 1;
+    return p[i] < q[i] ? -1 : 1;
+  }
+  return p.length - q.length;
 }
 
+const isSentence = (v) => typeof v === "string" && SENTENCE.test(v) && !SENTENCE_BAD.test(v);
 const isStr = (v) => typeof v === "string" && v.trim() !== "";
 
 export function checkData(d) {
@@ -89,7 +118,7 @@ export function checkData(d) {
     need(SEMVER.test(e.v ?? ""), `RELEASES[${i}].v must be a version such as 0.7.0`);
     need(DATE.test(e.date ?? ""), `RELEASES[${i}].date must be YYYY-MM-DD`);
     need(isStr(e.d), `RELEASES[${i}].d must be a non-empty string`);
-    need(!/["\\]/.test(e.d ?? ""), `RELEASES[${i}].d must not hold a quote or a backslash`);
+    need(isSentence(e.d), `RELEASES[${i}].d must be printable ASCII without < > & \` " or \\, at most 300 characters`);
     if (i > 0 && SEMVER.test(e.v ?? "") && SEMVER.test(rel[i - 1].v ?? ""))
       need(cmpVersion(rel[i - 1].v, e.v) > 0,
         `RELEASES must be newest first: ${rel[i - 1].v} is followed by ${e.v}`);
@@ -118,8 +147,16 @@ export function checkPage(html) {
   return checkData(data);
 }
 
-// A release page may differ from its base by one new first RELEASES entry and three SITE keys.
-export function checkRelease(baseHtml, headHtml, changedFiles) {
+// A release page may differ from its base by one new first RELEASES entry and three SITE lines,
+// each in exactly the shape the contract above gives.
+const ENTRY = /^  \{v:"([^"]*)", date:"([^"]*)", d:"([^"]*)"\},$/;
+const SITE_LINE = {
+  updated: /^  updated: "(\d{4}-\d{2}-\d{2})",$/,
+  released: /^  released: "(\d{4}-\d{2}-\d{2})",$/,
+  version: /^  version: "(\d+\.\d+\.\d+(?:-rc\.\d+)?)",$/,
+};
+
+export function checkRelease(baseHtml, headHtml, changedFiles, expectVersion) {
   const errs = [];
   const files = changedFiles.filter((f) => f !== "");
   const others = files.filter((f) => f !== "index.html");
@@ -129,16 +166,27 @@ export function checkRelease(baseHtml, headHtml, changedFiles) {
   const at = head.findIndex((l) => l.startsWith("const RELEASES = ["));
   const baseAt = base.findIndex((l) => l.startsWith("const RELEASES = ["));
   if (at < 0 || baseAt < 0) return [...errs, "`const RELEASES = [` not found"];
-  const entry = head[at + 1] ?? "";
-  if (!/^\s*\{v:"[^"\\]+", date:"\d{4}-\d{2}-\d{2}", d:"[^"\\]+"\},\s*$/.test(entry))
-    return [...errs, "the first line under `const RELEASES = [` must be the new entry {v:\"..\", date:\"..\", d:\"..\"},"];
+  const m = ENTRY.exec(head[at + 1] ?? "");
+  if (!m || !VERSION.test(m[1]) || !DATE.test(m[2]) || !isSentence(m[3]))
+    return [...errs, "the first line under `const RELEASES = [` must be exactly the new entry `  {v:\"<version>\", date:\"<YYYY-MM-DD>\", d:\"<sentence>\"},` with a printable-ASCII sentence of at most 300 characters without < > & ` \" or \\"];
+  const [, entryV, entryDate] = m;
   const rest = head.filter((_, i) => i !== at + 1);
   const keyLine = (lines, k) => lines.findIndex((l) => new RegExp(`^  ${k}: `).test(l));
+  const got = {};
   for (const k of ["updated", "version", "released"]) {
     const i = keyLine(rest, k), j = keyLine(base, k);
     if (i < 0 || j < 0) return [...errs, `SITE.${k} not found`];
+    const sm = SITE_LINE[k].exec(rest[i]);
+    if (!sm) return [...errs, `the SITE.${k} line must be exactly \`  ${k}: "<value>",\`, alone on its line`];
+    got[k] = sm[1];
     rest[i] = base[j];
   }
+  if (got.version !== entryV)
+    errs.push(`the new entry ${entryV} must equal SITE.version ${got.version}`);
+  if (got.released !== entryDate)
+    errs.push(`the new entry's date ${entryDate} must equal SITE.released ${got.released}`);
+  if (expectVersion !== undefined && entryV !== expectVersion)
+    errs.push(`the new entry ${entryV} must be the version of the branch, ${expectVersion}`);
   if (rest.length !== base.length)
     errs.push(`the page changes ${Math.abs(rest.length - base.length)} more line(s) than a release may`);
   else {
@@ -150,14 +198,21 @@ export function checkRelease(baseHtml, headHtml, changedFiles) {
 }
 
 function main(argv) {
-  const [page, flag, basePath, ...changed] = argv;
+  const [page, flag, basePath, ...more] = argv;
   if (!page || (flag !== undefined && (flag !== "--release" || !basePath))) {
-    console.error("usage: site_check.mjs index.html [--release BASE_INDEX_HTML CHANGED_FILES...]");
+    console.error("usage: site_check.mjs index.html [--release BASE_INDEX_HTML [--version V] CHANGED_FILES...]");
     return 2;
   }
+  let expect;
+  if (more[0] === "--version") { expect = more[1]; more.splice(0, 2); }
+  if (more[0] === "--version" || (expect !== undefined && !VERSION.test(expect))) {
+    console.error("site_check.mjs: --version takes a version such as 0.7.1");
+    return 2;
+  }
+  const changed = more;
   const head = readFileSync(page, "utf8");
   let errs = checkPage(head);
-  if (flag === "--release") errs = errs.concat(checkRelease(readFileSync(basePath, "utf8"), head, changed));
+  if (flag === "--release") errs = errs.concat(checkRelease(readFileSync(basePath, "utf8"), head, changed, expect));
   for (const e of errs) console.log(`site-check: ${e}`);
   if (errs.length === 0) console.log(`site-check: ok${flag ? " (release)" : ""}`);
   return errs.length === 0 ? 0 : 1;

@@ -73,7 +73,7 @@ test("refuses SITE.version that is not the newest release", () =>
   has(checkPage(sub(PAGE, 'version: "0.7.0"', 'version: "0.6.1"')), "must equal RELEASES[0].v"));
 
 test("refuses a release description with a quote", () =>
-  has(checkPage(sub(PAGE, "d:\"Second.\"", "d:\"It \\\"is\\\".\"")), "quote or a backslash"));
+  has(checkPage(sub(PAGE, "d:\"Second.\"", "d:\"It \\\"is\\\".\"")), "printable ASCII"));
 
 test("a prerelease sorts before its release", () => {
   const page = sub(sub(PAGE, 'version: "0.7.0"', 'version: "0.7.1-rc.1"'),
@@ -116,3 +116,49 @@ test("a release refuses an entry that is not first", () => {
 
 test("a release refuses a change outside the script", () =>
   has(checkRelease(PAGE, sub(REL, "<p>hi</p>", "<p>bye</p>"), ["index.html"]), "other lines differ"));
+
+const ok = ["index.html"];
+const withEntry = (d) => sub(REL, ENTRY, `  {v:"0.7.1", date:"2026-11-13", d:"${d}"},\n`);
+
+test("a release refuses extra code on a SITE line", () => {
+  has(checkRelease(PAGE, sub(REL, 'version: "0.7.1",', 'version: "0.7.1", repo: "https://evil.example",'), ok), "SITE.version line must be exactly");
+  has(checkRelease(PAGE, sub(REL, 'updated: "2026-11-13",', 'updated: "2026-11-13", x: typeof location<"u" && location.replace("https://evil.example"),'), ok), "SITE.updated line must be exactly");
+  has(checkRelease(PAGE, sub(REL, 'released: "2026-11-13",', 'released: "13 Nov",'), ok), "SITE.released line must be exactly");
+});
+
+test("a release refuses a SITE line of another shape", () =>
+  has(checkRelease(PAGE, sub(REL, 'version: "0.7.1",', 'version:"0.7.1",'), ok), "SITE.version not found"));
+
+test("a release refuses an entry that disagrees with SITE", () => {
+  has(checkRelease(PAGE, sub(REL, 'released: "2026-11-13"', 'released: "2026-11-12"'), ok), "must equal SITE.released");
+  has(checkRelease(PAGE, sub(REL, 'version: "0.7.1"', 'version: "0.7.2"'), ok), "must equal SITE.version");
+});
+
+test("a release refuses a version other than its branch's", () => {
+  assert.deepEqual(checkRelease(PAGE, REL, ok, "0.7.1"), []);
+  has(checkRelease(PAGE, REL, ok, "0.9.0"), "version of the branch");
+});
+
+test("a release refuses an entry of another shape", () => {
+  for (const bad of ['  {v: "0.7.1", date:"2026-11-13", d:"Third."},', '  {v:"0.7.1", date:"2026-11-13", d:"Third."}',
+    '{v:"0.7.1", date:"2026-11-13", d:"Third."},', '  {v:"0.7.1", date:"2026-11-13", d:"Third."}, x:1,',
+    '  {v:"0.7.1", date:"2026-11-13", d:""},'])
+    has(checkRelease(PAGE, sub(REL, ENTRY.trimEnd(), bad), ok), "must be exactly the new entry");
+});
+
+test("a release refuses a sentence that can end or reshape the script", () => {
+  for (const d of ["x</SCRIPT><img src=x onerror=alert(1)>", "x</script ><img>", "x <!--<script> y", "x</script>y",
+    "a & b", "a `b`", "a\\\\b", "caf\u00e9", "tab\there", "x".repeat(301)])
+    has(checkRelease(PAGE, withEntry(d), ok), "must be exactly the new entry");
+  assert.deepEqual(checkRelease(PAGE, withEntry("x".repeat(300)), ok), []);
+});
+
+test("a page's RELEASES refuse markup in a sentence", () =>
+  has(checkPage(sub(PAGE, 'd:"First."', 'd:"</SCRIPT>x"')), "printable ASCII"));
+
+test("prerelease identifiers compare numerically", () => {
+  const rc = (top, below) => sub(sub(sub(PAGE, 'version: "0.7.0"', `version: "${top}"`),
+    "const RELEASES = [\n", `const RELEASES = [\n  {v:"${top}", date:"2026-11-10", d:"b"},\n  {v:"${below}", date:"2026-11-10", d:"a"},\n`), "{v:\"0.7.0\"", "{v:\"0.7.0\"");
+  assert.deepEqual(checkPage(rc("0.7.1-rc.10", "0.7.1-rc.9")), []);
+  has(checkPage(rc("0.7.1-rc.9", "0.7.1-rc.10")), "newest first");
+});

@@ -26,17 +26,40 @@ jobs:
       - name: The page parses and its data is well formed
         run: node .github/scripts/site_check.mjs index.html
 
-      # The App opens `release/v<version>` branches. Such a pull request may change only the new
-      # RELEASES entry and SITE.version, SITE.released and SITE.updated. HEAD is the merge commit:
-      # HEAD^1 is the base it merges into.
+      # HEAD is the merge commit: HEAD^1 is the base it merges into. Under `pull_request` this
+      # workflow and the checker come from the PR itself, so a PR that edits them checks itself.
+      # This step refuses the one combination that matters: changing .github/ and the release data
+      # (a RELEASES entry or SITE.version, released, updated) together. The owner's ruleset should
+      # also require review for changes under .github/ (CODEOWNERS), which this step cannot do.
+      - name: A pull request does not change its own checker and the release data
+        run: |
+          if git diff --name-only HEAD^1 HEAD | grep -q '^\.github/' &&
+             git diff -U0 HEAD^1 HEAD -- index.html | grep -Eq '^[+-](  (version|released|updated): |  \{v:"|const RELEASES)'; then
+            echo "site-check: a pull request that changes .github/ must not also change the release data in index.html"
+            exit 1
+          fi
+
+      # A release may change only the new RELEASES entry and SITE.version, SITE.released and
+      # SITE.updated. It is a release pull request if its branch is `release/v*` or it was opened
+      # by the release App (a Bot whose login is the repository variable RELEASE_APP_LOGIN): the
+      # branch name is chosen by whoever pushes, the author is not, so a bot PR from any other
+      # branch gets the same restriction rather than none. Anyone else's PR is not restricted here
+      # (the owner's review is); the App's can only ever be a release.
       - name: A release changes only what a release may
         env:
           HEAD_REF: ${{ github.head_ref }}
+          AUTHOR_TYPE: ${{ github.event.pull_request.user.type }}
+          AUTHOR_LOGIN: ${{ github.event.pull_request.user.login }}
+          APP_LOGIN: ${{ vars.RELEASE_APP_LOGIN }}
         run: |
+          is_release=no; version=()
           case "$HEAD_REF" in
-            release/v*) ;;
-            *) echo "not a release pull request"; exit 0 ;;
+            release/v*) is_release=yes; version=(--version "${HEAD_REF#release/v}") ;;
           esac
+          if [ "$AUTHOR_TYPE" = Bot ] && [ -n "$APP_LOGIN" ] && [ "$AUTHOR_LOGIN" = "$APP_LOGIN" ]; then
+            is_release=yes
+          fi
+          if [ "$is_release" = no ]; then echo "not a release pull request"; exit 0; fi
           git show HEAD^1:index.html > "$RUNNER_TEMP/base-index.html"
           mapfile -t changed < <(git diff --name-only HEAD^1 HEAD)
-          node .github/scripts/site_check.mjs index.html --release "$RUNNER_TEMP/base-index.html" "${changed[@]}"
+          node .github/scripts/site_check.mjs index.html --release "$RUNNER_TEMP/base-index.html" "${version[@]}" "${changed[@]}"
