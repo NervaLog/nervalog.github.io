@@ -1,7 +1,10 @@
 // Tests of site_check.mjs: `node --test .github/scripts/site_check.test.mjs`
 import test from "node:test";
 import assert from "node:assert/strict";
-import { checkPage, checkRelease } from "./site_check.mjs";
+import { mkdtempSync, writeFileSync, symlinkSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { checkFiles, checkPage, checkRelease } from "./site_check.mjs";
 
 const PAGE = `<!doctype html><html><body><p>hi</p>
 <script>
@@ -161,4 +164,36 @@ test("prerelease identifiers compare numerically", () => {
     "const RELEASES = [\n", `const RELEASES = [\n  {v:"${top}", date:"2026-11-10", d:"b"},\n  {v:"${below}", date:"2026-11-10", d:"a"},\n`), "{v:\"0.7.0\"", "{v:\"0.7.0\"");
   assert.deepEqual(checkPage(rc("0.7.1-rc.10", "0.7.1-rc.9")), []);
   has(checkPage(rc("0.7.1-rc.9", "0.7.1-rc.10")), "newest first");
+});
+
+function siteDir(skip, link) {
+  const d = mkdtempSync(join(tmpdir(), "site-"));
+  for (const f of ["index.html", "404.html", "_headers"]) {
+    if (f === skip) continue;
+    if (f === link) symlinkSync(join(d, "nowhere"), join(d, f));
+    else writeFileSync(join(d, f), "x\n");
+  }
+  return d;
+}
+
+test("the site needs index.html, 404.html and _headers as regular files", () => {
+  const ok = siteDir();
+  assert.deepEqual(checkFiles(ok), []);
+  rmSync(ok, { recursive: true });
+  for (const f of ["index.html", "404.html", "_headers"]) {
+    for (const d of [siteDir(f, undefined), siteDir(undefined, f)]) {
+      const errs = checkFiles(d);
+      assert.equal(errs.length, 1);
+      assert.match(errs[0], new RegExp(`NRV-E1152.*${f}`));
+      rmSync(d, { recursive: true });
+    }
+  }
+});
+
+test("a directory is not a regular file", () => {
+  const d = siteDir();
+  rmSync(join(d, "_headers"));
+  symlinkSync(".", join(d, "_headers"));
+  assert.equal(checkFiles(d).length, 1);
+  rmSync(d, { recursive: true });
 });

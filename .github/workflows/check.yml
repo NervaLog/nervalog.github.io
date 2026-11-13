@@ -26,6 +26,11 @@ jobs:
       - name: The page parses and its data is well formed
         run: node .github/scripts/site_check.mjs index.html
 
+      # The Pages build command copies exactly these three files and refuses the build without
+      # them (NRV-E1152, docs/releases/packages.md in NervaLog/nerva).
+      - name: index.html, 404.html and _headers are regular files
+        run: node .github/scripts/site_check.mjs --files .
+
       # HEAD is the merge commit: HEAD^1 is the base it merges into. Under `pull_request` this
       # workflow and the checker come from the PR itself, so a PR that edits them checks itself.
       # This step refuses the one combination that matters: changing .github/ and the release data
