@@ -6,6 +6,9 @@
 //       as above, and the page differs from BASE_INDEX_HTML only by one new RELEASES entry and
 //       SITE.version, SITE.released and SITE.updated; CHANGED_FILES is only index.html. With
 //       --version V the new entry's version must be V (the `release/v<V>` branch name).
+//   node .github/scripts/site_check.mjs --files DIR
+//       index.html, 404.html and _headers are regular files in DIR, not symlinks (NRV-E1152: the
+//       Pages build command refuses the same, docs/releases/packages.md in NervaLog/nerva).
 //
 // THE CONTRACT with the Nerva side (site_release.py, release_notes.sh site; NervaLog/nerva
 // docs/releases/automation.md). A release changes exactly these lines of index.html, and nothing
@@ -22,7 +25,8 @@
 // The entry's v equals SITE.version. Do not loosen this: the page's script is code.
 //
 // Each refusal is one line starting "site-check:". Exit 1 on any, 2 on bad usage.
-import { readFileSync } from "node:fs";
+import { lstatSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 import vm from "node:vm";
 import { pathToFileURL } from "node:url";
 
@@ -197,7 +201,29 @@ export function checkRelease(baseHtml, headHtml, changedFiles, expectVersion) {
   return errs;
 }
 
+// The three files the Pages build copies (NRV-E1152): each must exist as a regular file, and a
+// symlink, even a dangling one, is refused.
+export const REQUIRED_FILES = ["index.html", "404.html", "_headers"];
+
+export function checkFiles(dir) {
+  const errs = [];
+  for (const f of REQUIRED_FILES) {
+    let st;
+    try { st = lstatSync(join(dir, f)); } catch { st = undefined; }
+    if (!st || st.isSymbolicLink() || !st.isFile())
+      errs.push(`error[NRV-E1152]: site build: ${f} is missing, not a regular file, or a symlink; nothing would be deployed`);
+  }
+  return errs;
+}
+
 function main(argv) {
+  if (argv[0] === "--files") {
+    if (argv.length !== 2) { console.error("usage: site_check.mjs --files DIR"); return 2; }
+    const errs = checkFiles(argv[1]);
+    for (const e of errs) console.log(`site-check: ${e}`);
+    if (errs.length === 0) console.log("site-check: ok (files)");
+    return errs.length === 0 ? 0 : 1;
+  }
   const [page, flag, basePath, ...more] = argv;
   if (!page || (flag !== undefined && (flag !== "--release" || !basePath))) {
     console.error("usage: site_check.mjs index.html [--release BASE_INDEX_HTML [--version V] CHANGED_FILES...]");
