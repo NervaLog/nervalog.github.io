@@ -202,7 +202,8 @@ export function checkRelease(baseHtml, headHtml, changedFiles, expectVersion) {
 }
 
 // The three files the Pages build copies (NRV-E1152): each must exist as a regular file, and a
-// symlink, even a dangling one, is refused.
+// symlink, even a dangling one, is refused. Messages end "; nothing is deployed", as the build
+// command does (docs/releases/packages.md in NervaLog/nerva), so a CI log greps like the build log.
 export const REQUIRED_FILES = ["index.html", "404.html", "_headers"];
 
 export function checkFiles(dir) {
@@ -211,7 +212,7 @@ export function checkFiles(dir) {
     let st;
     try { st = lstatSync(join(dir, f)); } catch { st = undefined; }
     if (!st || st.isSymbolicLink() || !st.isFile())
-      errs.push(`error[NRV-E1152]: site build: ${f} is missing, not a regular file, or a symlink; nothing would be deployed`);
+      errs.push(`error[NRV-E1152]: site build: ${f} is missing, not a regular file, or a symlink; nothing is deployed`);
   }
   return errs;
 }

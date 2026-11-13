@@ -1,9 +1,11 @@
 // Tests of site_check.mjs: `node --test .github/scripts/site_check.test.mjs`
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, writeFileSync, symlinkSync, rmSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, symlinkSync, rmSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, dirname } from "node:path";
 import { checkFiles, checkPage, checkRelease } from "./site_check.mjs";
 
 const PAGE = `<!doctype html><html><body><p>hi</p>
@@ -166,34 +168,64 @@ test("prerelease identifiers compare numerically", () => {
   has(checkPage(rc("0.7.1-rc.9", "0.7.1-rc.10")), "newest first");
 });
 
-function siteDir(skip, link) {
+const FILES = ["index.html", "404.html", "_headers"];
+const SCRIPT = join(dirname(fileURLToPath(import.meta.url)), "site_check.mjs");
+
+// A site directory, removed when the test ends, even when it fails. `how` says what to make of
+// each name in `names`: omitted (missing), "dangling" or "link" (a symlink to a regular file),
+// "dirlink" (a symlink to a directory), "dir" (a real directory).
+function siteDir(t, how = {}) {
   const d = mkdtempSync(join(tmpdir(), "site-"));
-  for (const f of ["index.html", "404.html", "_headers"]) {
-    if (f === skip) continue;
-    if (f === link) symlinkSync(join(d, "nowhere"), join(d, f));
+  t.after(() => rmSync(d, { recursive: true, force: true }));
+  writeFileSync(join(d, "real"), "x\n");
+  for (const f of FILES) {
+    const h = how[f];
+    if (h === "missing") continue;
+    else if (h === "dangling") symlinkSync(join(d, "nowhere"), join(d, f));
+    else if (h === "link") symlinkSync("real", join(d, f));
+    else if (h === "dirlink") symlinkSync(".", join(d, f));
+    else if (h === "dir") mkdirSync(join(d, f));
     else writeFileSync(join(d, f), "x\n");
   }
   return d;
 }
 
-test("the site needs index.html, 404.html and _headers as regular files", () => {
-  const ok = siteDir();
-  assert.deepEqual(checkFiles(ok), []);
-  rmSync(ok, { recursive: true });
-  for (const f of ["index.html", "404.html", "_headers"]) {
-    for (const d of [siteDir(f, undefined), siteDir(undefined, f)]) {
-      const errs = checkFiles(d);
-      assert.equal(errs.length, 1);
-      assert.match(errs[0], new RegExp(`NRV-E1152.*${f}`));
-      rmSync(d, { recursive: true });
+test("the site accepts three regular files", (t) => assert.deepEqual(checkFiles(siteDir(t)), []));
+
+test("each of the three files is refused when missing, dangling, a symlink or a directory", (t) => {
+  for (const f of FILES)
+    for (const h of ["missing", "dangling", "link", "dirlink", "dir"]) {
+      const errs = checkFiles(siteDir(t, { [f]: h }));
+      assert.equal(errs.length, 1, `${f} ${h}`);
+      assert.match(errs[0], new RegExp(`NRV-E1152.*${f}`), `${f} ${h}`);
     }
-  }
 });
 
-test("a directory is not a regular file", () => {
-  const d = siteDir();
-  rmSync(join(d, "_headers"));
-  symlinkSync(".", join(d, "_headers"));
-  assert.equal(checkFiles(d).length, 1);
-  rmSync(d, { recursive: true });
+test("a symlink to a regular file is refused, even though it is one", (t) => {
+  const d = siteDir(t, { "index.html": "link", "404.html": "link", _headers: "link" });
+  const errs = checkFiles(d);
+  assert.equal(errs.length, 3);
+  for (const f of FILES) assert.ok(errs.some((e) => e.includes(f)));
+});
+
+test("a real directory is refused as not a regular file", (t) => {
+  const d = siteDir(t, { _headers: "dir", "404.html": "dir" });
+  assert.equal(checkFiles(d).length, 2);
+});
+
+test("the message is the build command's, byte for byte", (t) => {
+  const [e] = checkFiles(siteDir(t, { _headers: "missing" }));
+  assert.equal(e, "error[NRV-E1152]: site build: _headers is missing, not a regular file, or a symlink; nothing is deployed");
+});
+
+test("--files on the command line: exit 1 and the NRV-E1152 line, exit 0 when fine, exit 2 on misuse", (t) => {
+  const run = (...args) => spawnSync(process.execPath, [SCRIPT, ...args], { encoding: "utf8" });
+  const bad = run("--files", siteDir(t, { "404.html": "link" }));
+  assert.equal(bad.status, 1);
+  assert.equal(bad.stdout, "site-check: error[NRV-E1152]: site build: 404.html is missing, not a regular file, or a symlink; nothing is deployed\n");
+  const good = run("--files", siteDir(t));
+  assert.equal(good.status, 0);
+  assert.equal(good.stdout, "site-check: ok (files)\n");
+  assert.equal(run("--files").status, 2);
+  assert.equal(run("--files", "a", "b").status, 2);
 });
