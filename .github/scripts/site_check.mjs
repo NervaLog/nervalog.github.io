@@ -336,10 +336,14 @@ export async function findReference(get) {
     const k = await get(`https://raw.githubusercontent.com/${REPO}/${encodeURIComponent(tag)}/${KEY_PATH}`);
     if (k.status === 404) return { tag, key: null };
     if (k.status !== 200) throw new Error(`the key file at ${tag} answered ${k.status}`);
-    return { tag, key: dearmor(k.body) };
+    try { return { tag, key: dearmor(k.body) }; }
+    catch (e) { throw new KeyFileError(`the key file at ${tag} is not readable: ${e.message}`); }
   }
   return null;
 }
+
+// Nerva's own key file at the tag cannot be read: not GitHub's fault, and a re-run cannot fix it.
+export class KeyFileError extends Error {}
 
 // The site's WKD pair against the reference. Never reads a file through a symlink.
 export function checkWkd(dir, ref) {
@@ -367,6 +371,18 @@ async function githubGet(url) {
   return { status: r.status, body: await r.text() };
 }
 
+// The reference, or the one printed line that refuses to compare against it. Fail closed: with no
+// reference nothing is compared. A bad key file at the tag is NRV-E1162 (Nerva's, a re-run cannot
+// fix it); any other failure is GitHub's (NRV-E1155).
+export async function readReference(get) {
+  try { return { ref: await findReference(get) }; }
+  catch (e) {
+    if (e instanceof KeyFileError)
+      return { line: `site-check: error[NRV-E1162]: ${e.message}; the key file in Nerva at that tag is not a valid armored public key, so nothing is compared; tell Nerva's maintainers` };
+    return { line: `site-check: error[NRV-E1155]: could not read Nerva's release data from GitHub: ${e.message}` };
+  }
+}
+
 async function main(argv) {
   if (argv[0] === "--tree") {
     if (argv.length !== 2) { console.error("usage: site_check.mjs --tree DIR"); return 2; }
@@ -377,13 +393,9 @@ async function main(argv) {
   }
   if (argv[0] === "--wkd") {
     if (argv.length !== 2) { console.error("usage: site_check.mjs --wkd DIR"); return 2; }
-    let ref;
-    try { ref = await findReference(githubGet); }
-    catch (e) {
-      // Fail closed: the reference could not be read, so nothing is compared (NRV-E1155).
-      console.log(`site-check: error[NRV-E1155]: could not read Nerva's release data from GitHub: ${e.message}`);
-      return 1;
-    }
+    const refd = await readReference(githubGet);
+    if (refd.line !== undefined) { console.log(refd.line); return 1; }
+    const ref = refd.ref;
     const errs = checkWkd(argv[1], ref);
     for (const e of errs) console.log(`site-check: ${e}`);
     if (errs.length === 0) {

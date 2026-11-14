@@ -6,7 +6,7 @@ import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
-import { checkFiles, checkPage, checkRelease, checkTree, checkWkd, dearmor, findReference, WKD_KEY, WKD_POLICY } from "./site_check.mjs";
+import { checkFiles, checkPage, checkRelease, checkTree, checkWkd, dearmor, findReference, readReference, WKD_KEY, WKD_POLICY } from "./site_check.mjs";
 
 const PAGE = `<!doctype html><html><body><p>hi</p>
 <script>
@@ -531,6 +531,33 @@ test("a reference that cannot be read is an error, not a pass", async () => {
   const gh = github({ releases: R, onMain: ["v0.7.1"], keys: { "v0.7.1": K0 } });
   const flaky = async (url) => (url === keyUrl("v0.7.1") ? { status: 502, body: "" } : gh.get(url));
   await assert.rejects(findReference(flaky), /502/);
+});
+
+test("--wkd prints one NRV-E1155 line when GitHub cannot be read", async () => {
+  const r = await readReference(async () => ({ status: 503, body: "" }));
+  assert.equal(r.line, "site-check: error[NRV-E1155]: could not read Nerva's release data from GitHub: the releases list answered 503");
+  const thrown = await readReference(async () => { throw new Error("fetch failed"); });
+  assert.equal(thrown.line, "site-check: error[NRV-E1155]: could not read Nerva's release data from GitHub: fetch failed");
+});
+
+test("--wkd prints one NRV-E1162 line when the key file at the tag is corrupt, not E1155", async () => {
+  const gh = github({ releases: R, onMain: ["v0.7.1"], keys: { "v0.7.1": K0 } });
+  const bad = async (url) => (url === keyUrl("v0.7.1") ? { status: 200, body: "not a key" } : gh.get(url));
+  const r = await readReference(bad);
+  assert.equal(r.line, "site-check: error[NRV-E1162]: the key file at v0.7.1 is not readable: not one armored PGP public key block; the key file in Nerva at that tag is not a valid armored public key, so nothing is compared; tell Nerva's maintainers");
+});
+
+test("the E1162 line for a differing key is pinned", (t) => {
+  const [e] = checkWkd(wkdDir(t, Buffer.from("other")), { tag: "v0.7.1", key: Buffer.from("key") });
+  assert.equal(e, "error[NRV-E1162]: the WKD key file differs from packaging/keys/nerva-release.asc at v0.7.1; open a site pull request with the gpg --dearmor of packaging/keys/nerva-release.asc at that tag");
+});
+
+test("--tree prints the pinned NRV-E1152 line", (t) => {
+  const d = siteDir(t);
+  writeFileSync(join(d, "package.json"), "{}");
+  const r = spawnSync(process.execPath, [SCRIPT, "--tree", d], { encoding: "utf8" });
+  assert.equal(r.status, 1);
+  assert.match(r.stdout.split("\n")[0], /^site-check: error\[NRV-E1152\]: site build: .+; nothing is deployed$/);
 });
 
 test("the reference is never named by the pull request: --wkd takes no tag", () => {

@@ -55,6 +55,16 @@ jobs:
             exit 1
           fi
 
+      # Nor may a pull request change the checker and the WKD key it checks: it would pass its own
+      # check. A release that carries the WKD pair (and no .github/) is fine.
+      - name: A pull request does not change its own checker and the WKD key
+        run: |
+          changed=$(git diff --name-only HEAD^1 HEAD)
+          if printf '%s\n' "$changed" | grep -q '^\.github/' && printf '%s\n' "$changed" | grep -q '^\.well-known/'; then
+            echo "site-check: a pull request that changes .github/ must not also change .well-known/"
+            exit 1
+          fi
+
       # A release may change only the new RELEASES entry and SITE.version, SITE.released and
       # SITE.updated. It is a release pull request if its branch is `release/v*` or it was opened
       # by the release App (a Bot whose login is the repository variable RELEASE_APP_LOGIN): the
