@@ -46,7 +46,9 @@ jobs:
       # workflow and the checker come from the PR itself, so a PR that edits them checks itself.
       # This step refuses the one combination that matters: changing .github/ and the release data
       # (a RELEASES entry or SITE.version, released, updated) together. The owner's ruleset should
-      # also require review for changes under .github/ (a ruleset rule), which this step cannot do.
+      # also require review for changes under .github/; that ruleset rule is not set up yet. Both guard
+      # steps live in this file, so a pull request that edits check.yml can delete them with the
+      # change they guard: they catch accidents only, and the owner's review of .github/ is the control.
       - name: A pull request does not change its own checker and the release data
         run: |
           if git diff --name-only HEAD^1 HEAD | grep -q '^\.github/' &&

@@ -6,7 +6,7 @@ import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
-import { checkFiles, checkPage, checkRelease, checkTree, checkWkd, dearmor, findReference, readReference, WKD_KEY, WKD_POLICY } from "./site_check.mjs";
+import { checkFiles, checkPage, checkRelease, checkTree, checkWkd, dearmor, findReference, readReference, runWkd, WKD_KEY, WKD_POLICY } from "./site_check.mjs";
 
 const PAGE = `<!doctype html><html><body><p>hi</p>
 <script>
@@ -545,6 +545,43 @@ test("--wkd prints one NRV-E1162 line when the key file at the tag is corrupt, n
   const bad = async (url) => (url === keyUrl("v0.7.1") ? { status: 200, body: "not a key" } : gh.get(url));
   const r = await readReference(bad);
   assert.equal(r.line, "site-check: error[NRV-E1162]: the key file at v0.7.1 is not readable: not one armored PGP public key block; the key file in Nerva at that tag is not a valid armored public key, so nothing is compared; tell Nerva's maintainers");
+});
+
+// Run runWkd with console.log captured: its exit status and the lines it printed.
+async function wkdRun(dir, get) {
+  const lines = [];
+  const orig = console.log;
+  console.log = (l) => lines.push(l);
+  try { return { status: await runWkd(dir, get), lines }; } finally { console.log = orig; }
+}
+
+test("runWkd exits 1 with one line, and compares nothing, when GitHub cannot be read", async (t) => {
+  const d = wkdDir(t, K0);
+  for (const get of [async () => ({ status: 503, body: "" }), async () => { throw new Error("fetch failed"); }]) {
+    const r = await wkdRun(d, get);
+    assert.equal(r.status, 1);
+    assert.equal(r.lines.length, 1);
+    assert.match(r.lines[0], /^site-check: error\[NRV-E1155\]: could not read Nerva's release data from GitHub: /);
+  }
+});
+
+test("runWkd exits 1 with one NRV-E1162 line for a corrupt key file at the tag", async (t) => {
+  const gh = github({ releases: R, onMain: ["v0.7.1"], keys: { "v0.7.1": K0 } });
+  const bad = async (url) => (url === keyUrl("v0.7.1") ? { status: 200, body: "not a key" } : gh.get(url));
+  const r = await wkdRun(wkdDir(t, K0), bad);
+  assert.equal(r.status, 1);
+  assert.equal(r.lines.length, 1);
+  assert.match(r.lines[0], /^site-check: error\[NRV-E1162\]: the key file at v0\.7\.1 is not readable/);
+});
+
+test("runWkd exits 0 for a matching pair and 1 for a differing one", async (t) => {
+  const gh = github({ releases: R, onMain: ["v0.7.0", "v0.7.1"], keys: { "v0.7.1": K0 } });
+  const ok = await wkdRun(wkdDir(t, K0), gh.get);
+  assert.equal(ok.status, 0);
+  assert.equal(ok.lines.at(-1), "site-check: ok (wkd)");
+  const bad = await wkdRun(wkdDir(t, K1), gh.get);
+  assert.equal(bad.status, 1);
+  assert.match(bad.lines[0], /^site-check: error\[NRV-E1162\]: .*differs/);
 });
 
 test("the E1162 line for a differing key is pinned", (t) => {

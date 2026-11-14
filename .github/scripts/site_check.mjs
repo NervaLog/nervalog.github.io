@@ -383,6 +383,22 @@ export async function readReference(get) {
   }
 }
 
+// --wkd: print the findings, return the exit status. `get` is injectable for tests. Fails closed:
+// with no reference nothing is compared and the status is 1.
+export async function runWkd(dir, get) {
+  const refd = await readReference(get);
+  if (refd.line !== undefined) { console.log(refd.line); return 1; }
+  const ref = refd.ref;
+  const errs = checkWkd(dir, ref);
+  for (const e of errs) console.log(`site-check: ${e}`);
+  if (errs.length === 0) {
+    if (ref === null) console.log("site-check: notice: Nerva has no published tag on main; no WKD file is required");
+    else if (ref.key === null) console.log(`site-check: notice: ${ref.tag} has no key file; no WKD file is allowed`);
+    console.log("site-check: ok (wkd)");
+  }
+  return errs.length === 0 ? 0 : 1;
+}
+
 async function main(argv) {
   if (argv[0] === "--tree") {
     if (argv.length !== 2) { console.error("usage: site_check.mjs --tree DIR"); return 2; }
@@ -393,17 +409,7 @@ async function main(argv) {
   }
   if (argv[0] === "--wkd") {
     if (argv.length !== 2) { console.error("usage: site_check.mjs --wkd DIR"); return 2; }
-    const refd = await readReference(githubGet);
-    if (refd.line !== undefined) { console.log(refd.line); return 1; }
-    const ref = refd.ref;
-    const errs = checkWkd(argv[1], ref);
-    for (const e of errs) console.log(`site-check: ${e}`);
-    if (errs.length === 0) {
-      if (ref === null) console.log("site-check: notice: Nerva has no published tag on main; no WKD file is required");
-      else if (ref.key === null) console.log(`site-check: notice: ${ref.tag} has no key file; no WKD file is allowed`);
-      console.log("site-check: ok (wkd)");
-    }
-    return errs.length === 0 ? 0 : 1;
+    return runWkd(argv[1], githubGet);
   }
 
   if (argv[0] === "--files") {
