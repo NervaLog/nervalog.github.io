@@ -383,7 +383,7 @@ const PRODUCTION = [
   {id:"R7", name:"Retention", status:"plan", gate:false,
    goal:"History and view versions are kept for a declared horizon, then trimmed: disk, export and import stay bounded by the live set plus one horizon.",
    note:"Nothing is trimmed today. Commit keys and facts stay kept (P123, P422). Brief written (docs/briefs/r7.md).",
-   demo:[["","# a 60 s horizon over 30 horizons, a load that rewrites a fixed set: data and export time stay flat"],["","# a read below the horizon: before_horizon (NRV-E0411, 410)"]]},
+   demo:[["","# a 60 s horizon over 30 horizons, a load that rewrites a fixed set: data, export time and memory stay flat"],["","# a read below the horizon is refused: before_horizon"]]},
   {id:"R8", name:"Native client", status:"plan", gate:false,
    goal:"A JVM client reaches the cluster through Nerva's client library over a C ABI: no gateway, no JSON, concurrent calls batched into one op.",
    note:"The gateway groups at most 16 requests per op (P143); TigerBeetle's clients batch about 8,000 events. The gateway stays for other languages (N39). Brief written (docs/briefs/r8.md).",
