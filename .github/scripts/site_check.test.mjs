@@ -1,12 +1,12 @@
 // Tests of site_check.mjs: `node --test .github/scripts/site_check.test.mjs`
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, writeFileSync, symlinkSync, rmSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, symlinkSync, rmSync, readFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
-import { checkFiles, checkPage, checkRelease } from "./site_check.mjs";
+import { checkFiles, checkPage, checkRelease, checkTree, checkWkd, dearmor, findReference, readReference, runWkd, WKD_KEY, WKD_POLICY } from "./site_check.mjs";
 
 const PAGE = `<!doctype html><html><body><p>hi</p>
 <script>
@@ -228,4 +228,376 @@ test("--files on the command line: exit 1 and the NRV-E1152 line, exit 0 when fi
   assert.equal(good.stdout, "site-check: ok (files)\n");
   assert.equal(run("--files").status, 2);
   assert.equal(run("--files", "a", "b").status, 2);
+});
+
+// ---- a release pull request may carry the WKD pair (NervaLog/nerva#402) ----------------------------
+
+test("a release with index.html and exactly the two WKD files passes", () => {
+  assert.deepEqual(checkRelease(PAGE, REL, ["index.html", WKD_POLICY, WKD_KEY]), []);
+  assert.deepEqual(checkRelease(PAGE, REL, [WKD_KEY, "index.html", WKD_POLICY], "0.7.1"), []);
+});
+
+test("a release refuses only one of the two WKD files", () => {
+  has(checkRelease(PAGE, REL, ["index.html", WKD_POLICY]), "both WKD files or neither");
+  has(checkRelease(PAGE, REL, ["index.html", WKD_KEY]), "both WKD files or neither");
+});
+
+test("a release refuses any other path beside the WKD files", () => {
+  has(checkRelease(PAGE, REL, ["index.html", WKD_POLICY, WKD_KEY, "README.md"]), "not README.md");
+  has(checkRelease(PAGE, REL, ["index.html", WKD_POLICY, WKD_KEY, ".well-known/openpgpkey/hu/other"]), "not .well-known/openpgpkey/hu/other");
+  has(checkRelease(PAGE, REL, ["index.html", WKD_POLICY, WKD_KEY, "_headers"]), "not _headers");
+  has(checkRelease(PAGE, REL, ["index.html", WKD_POLICY, ".well-known/openpgpkey/hu/xxxx"]), "not .well-known/openpgpkey/hu/xxxx");
+});
+
+test("a release that carries the WKD pair still has its page checked", () =>
+  has(checkRelease(PAGE, sub(REL, "<p>hi</p>", "<p>bye</p>"), ["index.html", WKD_POLICY, WKD_KEY]), "other lines differ"));
+
+// ---- the tree: every name the build gate refuses ------------------------------------------------------
+
+// A repository tree: the three site files, the text files, and the WKD pair unless `wkd` is false.
+function tree(t, { wkd = true } = {}) {
+  const d = siteDir(t);
+  writeFileSync(join(d, "README.md"), "r\n");
+  writeFileSync(join(d, "CLAUDE.md"), "c\n");
+  mkdirSync(join(d, ".github"));
+  if (wkd) {
+    mkdirSync(join(d, ".well-known/openpgpkey/hu"), { recursive: true });
+    writeFileSync(join(d, WKD_POLICY), "");
+    writeFileSync(join(d, WKD_KEY), "key");
+  }
+  return d;
+}
+// siteDir leaves a regular file named `real` at the root, which the allow-list would refuse.
+const clean = (t, opts) => { const d = tree(t, opts); rmSync(join(d, "real")); return d; };
+
+test("a tree of the allowed names passes, with the WKD pair or without it", (t) => {
+  assert.deepEqual(checkTree(clean(t)), []);
+  assert.deepEqual(checkTree(clean(t, { wkd: false })), []);
+});
+
+test("a root name off the allow-list is refused, whatever it is", (t) => {
+  for (const name of ["package.json", "wrangler.toml", "wrangler.jsonc", "functions", "_worker.js", "_routes.json",
+    ".env", ".env.local", ".nvmrc", ".node-version", ".npmrc", ".dev.vars", ".nerva-site", "CODEOWNERS", "LICENSE.md"]) {
+    const d = clean(t);
+    writeFileSync(join(d, name), "x");
+    const errs = checkTree(d);
+    assert.equal(errs.length, 1, name);
+    assert.equal(errs[0], `error[NRV-E1152]: site build: ${name} is not allowed in the site repository; nothing is deployed`);
+  }
+});
+
+test("a dangling symlink at a root name off the allow-list is refused too", (t) => {
+  const d = clean(t);
+  symlinkSync(join(d, "nowhere"), join(d, "wrangler.toml"));
+  has(checkTree(d), "wrangler.toml is not allowed");
+});
+
+test("a symlink at an allowed metadata name is refused", (t) => {
+  for (const name of [".git", ".github", ".nojekyll", "README.md", "LICENSE", "CLAUDE.md"]) {
+    const d = clean(t);
+    rmSync(join(d, name), { recursive: true, force: true });
+    symlinkSync(join(d, "nowhere"), join(d, name));
+    has(checkTree(d), `${name} is a symlink`);
+  }
+});
+
+test("a path under .well-known that is not the pair is refused", (t) => {
+  const d = clean(t);
+  writeFileSync(join(d, ".well-known/security.txt"), "x");
+  writeFileSync(join(d, ".well-known/openpgpkey/hu/other"), "x");
+  mkdirSync(join(d, ".well-known/openpgpkey/hu/sub"));
+  const errs = checkTree(d);
+  has(errs, ".well-known/security.txt is not allowed");
+  has(errs, ".well-known/openpgpkey/hu/other is not allowed");
+  has(errs, ".well-known/openpgpkey/hu/sub is not allowed");
+});
+
+test("a name with a newline under .well-known is refused", (t) => {
+  const d = clean(t);
+  writeFileSync(join(d, ".well-known/openpgpkey/hu/a\nb"), "x");
+  assert.equal(checkTree(d).length, 1);
+});
+
+test("a symlink at the WKD files or their directories is refused, a dangling one included", (t) => {
+  for (const path of [WKD_POLICY, WKD_KEY, ".well-known/openpgpkey/hu", ".well-known/openpgpkey", ".well-known"]) {
+    const d = clean(t);
+    rmSync(join(d, path), { recursive: true, force: true });
+    symlinkSync(join(d, "nowhere"), join(d, path));
+    has(checkTree(d), `${path} is a symlink`);
+  }
+});
+
+test("a symlink to a real file at a WKD file is refused, and is not read through", (t) => {
+  const d = clean(t);
+  rmSync(join(d, WKD_KEY));
+  symlinkSync(join(d, "404.html"), join(d, WKD_KEY));
+  has(checkTree(d), `${WKD_KEY} is a symlink`);
+});
+
+test("one WKD file without the other is refused, either way round", (t) => {
+  for (const gone of [WKD_POLICY, WKD_KEY]) {
+    const d = clean(t);
+    rmSync(join(d, gone));
+    has(checkTree(d), "one WKD file is present without the other");
+  }
+});
+
+test("a WKD file that is a directory is refused", (t) => {
+  const d = clean(t);
+  rmSync(join(d, WKD_POLICY));
+  mkdirSync(join(d, WKD_POLICY));
+  has(checkTree(d), "is not");
+});
+
+test(".well-known that is a file is refused", (t) => {
+  const d = clean(t, { wkd: false });
+  writeFileSync(join(d, ".well-known"), "x");
+  has(checkTree(d), ".well-known is not a directory");
+});
+
+test("--tree on the command line", (t) => {
+  const run = (...args) => spawnSync(process.execPath, [SCRIPT, ...args], { encoding: "utf8" });
+  assert.equal(run("--tree", clean(t)).stdout, "site-check: ok (tree)\n");
+  const d = clean(t);
+  writeFileSync(join(d, "package.json"), "{}");
+  const bad = run("--tree", d);
+  assert.equal(bad.status, 1);
+  assert.match(bad.stdout, /^site-check: error\[NRV-E1152\]: site build: package.json is not allowed/);
+  assert.equal(run("--tree").status, 2);
+});
+
+// ---- dearmor ----------------------------------------------------------------------------------------------
+
+function crc24(buf) {
+  let crc = 0xb704ce;
+  for (const b of buf) { crc ^= b << 16; for (let i = 0; i < 8; i++) { crc <<= 1; if (crc & 0x1000000) crc ^= 0x864cfb; } }
+  return crc & 0xffffff;
+}
+const armor = (bin, { crc = crc24(bin), headers = "" } = {}) => {
+  const b64 = bin.toString("base64").match(/.{1,64}/g).join("\n");
+  const c = Buffer.from([crc >> 16, (crc >> 8) & 255, crc & 255]).toString("base64");
+  return `-----BEGIN PGP PUBLIC KEY BLOCK-----\n${headers}\n${b64}\n=${c}\n-----END PGP PUBLIC KEY BLOCK-----\n`;
+};
+const KEY_BIN = Buffer.from(Array.from({ length: 300 }, (_, i) => (i * 7 + 3) & 255));
+
+test("dearmor returns the binary body, with or without armor headers", () => {
+  assert.ok(dearmor(armor(KEY_BIN)).equals(KEY_BIN));
+  assert.ok(dearmor(armor(KEY_BIN, { headers: "Comment: x\n" })).equals(KEY_BIN));
+});
+
+test("dearmor refuses a bad checksum, an empty body and text that is not a key block", () => {
+  assert.throws(() => dearmor(armor(KEY_BIN, { crc: 1 })), /checksum/);
+  assert.throws(() => dearmor("-----BEGIN PGP PUBLIC KEY BLOCK-----\n\n-----END PGP PUBLIC KEY BLOCK-----\n"), /empty/);
+  assert.throws(() => dearmor("hello"), /not one armored/);
+});
+
+test("dearmor agrees with gpg --dearmor on Nerva's own key file, when gpg is here", (t) => {
+  const key = new URL("../../../nerva/packaging/keys/nerva-release.asc", import.meta.url);
+  let asc;
+  try { asc = readFileSync(key, "utf8"); } catch { return t.skip("no checkout of NervaLog/nerva beside this one"); }
+  const g = spawnSync("gpg", ["--dearmor"], { input: asc });
+  if (g.status !== 0) return t.skip("no gpg");
+  assert.ok(dearmor(asc).equals(g.stdout));
+});
+
+// ---- the reference, and the WKD file against it (NRV-E1162) -----------------------------------------
+
+const K0 = Buffer.from("key at 0.7.1");
+const K1 = Buffer.from("key at 0.7.2-rc.1 (a rotation's next key)");
+const releasesUrl = "https://api.github.com/repos/NervaLog/nerva/releases?per_page=100&page=1";
+const compareUrl = (tag) => `https://api.github.com/repos/NervaLog/nerva/compare/${tag}...main`;
+const keyUrl = (tag) => `https://raw.githubusercontent.com/NervaLog/nerva/${tag}/packaging/keys/nerva-release.asc`;
+
+// A fake GitHub: `releases` are {tag, at, draft?}, `onMain` the tags that are ancestors of main
+// (the others are "diverged"), `keys` maps a tag to its binary key file (none: a 404).
+function github({ releases, onMain, keys }) {
+  const seen = [];
+  const get = async (url) => {
+    seen.push(url);
+    if (url === releasesUrl)
+      return { status: 200, body: JSON.stringify(releases.map((r) => ({ tag_name: r.tag, published_at: r.at, draft: !!r.draft }))) };
+    for (const r of releases) {
+      if (url === compareUrl(r.tag))
+        return { status: 200, body: JSON.stringify({ status: onMain.includes(r.tag) ? "ahead" : "diverged" }) };
+      if (url === keyUrl(r.tag))
+        return keys[r.tag] ? { status: 200, body: armor(keys[r.tag]) } : { status: 404, body: "404: Not Found" };
+    }
+    return { status: 500, body: "unexpected " + url };
+  };
+  return { get, seen };
+}
+const R = [
+  { tag: "v0.7.0", at: "2026-11-10T10:00:00Z" },
+  { tag: "v0.7.1", at: "2026-11-13T10:00:00Z" },
+];
+
+// A site directory holding the WKD pair with `key` in it, or none.
+function wkdDir(t, key) {
+  const d = mkdtempSync(join(tmpdir(), "wkd-"));
+  t.after(() => rmSync(d, { recursive: true, force: true }));
+  if (key) {
+    mkdirSync(join(d, ".well-known/openpgpkey/hu"), { recursive: true });
+    writeFileSync(join(d, WKD_POLICY), "");
+    writeFileSync(join(d, WKD_KEY), key);
+  }
+  return d;
+}
+
+test("the reference is the key file at the newest published tag on main", async () => {
+  const gh = github({ releases: R, onMain: ["v0.7.0", "v0.7.1"], keys: { "v0.7.1": K0 } });
+  const ref = await findReference(gh.get);
+  assert.equal(ref.tag, "v0.7.1");
+  assert.ok(ref.key.equals(K0));
+});
+
+test("a candidate cut during a rotation is the reference, prereleases included", async (t) => {
+  const releases = [...R, { tag: "v0.7.2-rc.1", at: "2026-11-20T10:00:00Z" }];
+  const gh = github({ releases, onMain: releases.map((r) => r.tag), keys: { "v0.7.1": K0, "v0.7.2-rc.1": K1 } });
+  const ref = await findReference(gh.get);
+  assert.equal(ref.tag, "v0.7.2-rc.1");
+  // An unrelated site pull request, carrying the old key file, must carry the candidate's.
+  has(checkWkd(wkdDir(t, K0), ref), "differs from packaging/keys/nerva-release.asc at v0.7.2-rc.1");
+  assert.deepEqual(checkWkd(wkdDir(t, K1), ref), []);
+});
+
+test("a candidate's pull request, its entry first in RELEASES, is checked against the same reference", async (t) => {
+  // The candidate's tag exists before its site pull request is merged. RELEASES is never read:
+  // the page below names 0.7.2-rc.1 first and the reference is still the newest tag's key file.
+  const releases = [...R, { tag: "v0.7.2-rc.1", at: "2026-11-20T10:00:00Z" }];
+  const gh = github({ releases, onMain: releases.map((r) => r.tag), keys: { "v0.7.1": K0, "v0.7.2-rc.1": K0 } });
+  const page = sub(sub(PAGE, 'version: "0.7.0"', 'version: "0.7.2-rc.1"'),
+    "const RELEASES = [\n", 'const RELEASES = [\n  {v:"0.7.2-rc.1", date:"2026-11-10", d:"Rc."},\n');
+  assert.deepEqual(checkPage(page), []);
+  assert.deepEqual(checkWkd(wkdDir(t, K0), await findReference(gh.get)), []);
+});
+
+test("a prerelease tagged on a branch is skipped, so the reference does not roll back", async () => {
+  // Newer than the last release, with an older key file (or none): not an ancestor of main.
+  for (const keys of [{ "v0.7.1": K1, "v0.7.2-rc.1": K0 }, { "v0.7.1": K1 }]) {
+    const releases = [...R, { tag: "v0.7.2-rc.1", at: "2026-11-20T10:00:00Z" }];
+    const gh = github({ releases, onMain: ["v0.7.0", "v0.7.1"], keys });
+    const ref = await findReference(gh.get);
+    assert.equal(ref.tag, "v0.7.1");
+    assert.ok(ref.key.equals(K1));
+    assert.ok(!gh.seen.includes(keyUrl("v0.7.2-rc.1")), "the branch tag's key file is never read");
+  }
+});
+
+test("a draft, and a tag that is not v*, are never the reference", async () => {
+  const releases = [...R, { tag: "v0.7.2", at: "2026-11-21T10:00:00Z", draft: true }, { tag: "nightly", at: "2026-11-22T10:00:00Z" }];
+  const gh = github({ releases, onMain: releases.map((r) => r.tag), keys: { "v0.7.1": K0, "v0.7.2": K1, nightly: K1 } });
+  assert.equal((await findReference(gh.get)).tag, "v0.7.1");
+});
+
+test("the newest is by published_at, whatever order GitHub lists", async () => {
+  const gh = github({ releases: [R[1], R[0]].reverse(), onMain: ["v0.7.0", "v0.7.1"], keys: { "v0.7.1": K0 } });
+  assert.equal((await findReference(gh.get)).tag, "v0.7.1");
+});
+
+test("v0.7.0 has no key file: no WKD file may be present", async (t) => {
+  const gh = github({ releases: [R[0]], onMain: ["v0.7.0"], keys: {} });
+  const ref = await findReference(gh.get);
+  assert.deepEqual(ref, { tag: "v0.7.0", key: null });
+  assert.deepEqual(checkWkd(wkdDir(t), ref), []);
+  has(checkWkd(wkdDir(t, K0), ref), "NRV-E1162");
+  has(checkWkd(wkdDir(t, K0), ref), "has no key file");
+});
+
+test("Nerva with no tag on main: no WKD file may be present", async (t) => {
+  const ref = await findReference(github({ releases: [], onMain: [], keys: {} }).get);
+  assert.equal(ref, null);
+  assert.deepEqual(checkWkd(wkdDir(t), ref), []);
+  has(checkWkd(wkdDir(t, K0), ref), "NRV-E1162");
+});
+
+test("a reference with a key file requires both WKD files and the same bytes", async (t) => {
+  const ref = await findReference(github({ releases: R, onMain: ["v0.7.0", "v0.7.1"], keys: { "v0.7.1": K0 } }).get);
+  assert.deepEqual(checkWkd(wkdDir(t, K0), ref), []);
+  has(checkWkd(wkdDir(t), ref), "NRV-E1162");           // none
+  has(checkWkd(wkdDir(t, K1), ref), "differs");
+  has(checkWkd(wkdDir(t, Buffer.concat([K0, Buffer.from("\n")])), ref), "differs");
+  const one = wkdDir(t, K0);
+  rmSync(join(one, WKD_POLICY));
+  has(checkWkd(one, ref), "NRV-E1162");
+  const link = wkdDir(t, K1);
+  rmSync(join(link, WKD_KEY));
+  writeFileSync(join(link, "real"), K0);
+  symlinkSync(join(link, "real"), join(link, WKD_KEY));
+  has(checkWkd(link, ref), "NRV-E1162");               // a link to the right bytes is not the file
+});
+
+test("a reference that cannot be read is an error, not a pass", async () => {
+  await assert.rejects(findReference(async () => ({ status: 503, body: "" })), /503/);
+  const gh = github({ releases: R, onMain: ["v0.7.1"], keys: { "v0.7.1": K0 } });
+  const flaky = async (url) => (url === keyUrl("v0.7.1") ? { status: 502, body: "" } : gh.get(url));
+  await assert.rejects(findReference(flaky), /502/);
+});
+
+test("--wkd prints one NRV-E1155 line when GitHub cannot be read", async () => {
+  const r = await readReference(async () => ({ status: 503, body: "" }));
+  assert.equal(r.line, "site-check: error[NRV-E1155]: could not read Nerva's release data from GitHub: the releases list answered 503");
+  const thrown = await readReference(async () => { throw new Error("fetch failed"); });
+  assert.equal(thrown.line, "site-check: error[NRV-E1155]: could not read Nerva's release data from GitHub: fetch failed");
+});
+
+test("--wkd prints one NRV-E1162 line when the key file at the tag is corrupt, not E1155", async () => {
+  const gh = github({ releases: R, onMain: ["v0.7.1"], keys: { "v0.7.1": K0 } });
+  const bad = async (url) => (url === keyUrl("v0.7.1") ? { status: 200, body: "not a key" } : gh.get(url));
+  const r = await readReference(bad);
+  assert.equal(r.line, "site-check: error[NRV-E1162]: the key file at v0.7.1 is not readable: not one armored PGP public key block; the key file in Nerva at that tag is not a valid armored public key, so nothing is compared; tell Nerva's maintainers");
+});
+
+// Run runWkd with console.log captured: its exit status and the lines it printed.
+async function wkdRun(dir, get) {
+  const lines = [];
+  const orig = console.log;
+  console.log = (l) => lines.push(l);
+  try { return { status: await runWkd(dir, get), lines }; } finally { console.log = orig; }
+}
+
+test("runWkd exits 1 with one line, and compares nothing, when GitHub cannot be read", async (t) => {
+  const d = wkdDir(t, K0);
+  for (const get of [async () => ({ status: 503, body: "" }), async () => { throw new Error("fetch failed"); }]) {
+    const r = await wkdRun(d, get);
+    assert.equal(r.status, 1);
+    assert.equal(r.lines.length, 1);
+    assert.match(r.lines[0], /^site-check: error\[NRV-E1155\]: could not read Nerva's release data from GitHub: /);
+  }
+});
+
+test("runWkd exits 1 with one NRV-E1162 line for a corrupt key file at the tag", async (t) => {
+  const gh = github({ releases: R, onMain: ["v0.7.1"], keys: { "v0.7.1": K0 } });
+  const bad = async (url) => (url === keyUrl("v0.7.1") ? { status: 200, body: "not a key" } : gh.get(url));
+  const r = await wkdRun(wkdDir(t, K0), bad);
+  assert.equal(r.status, 1);
+  assert.equal(r.lines.length, 1);
+  assert.match(r.lines[0], /^site-check: error\[NRV-E1162\]: the key file at v0\.7\.1 is not readable/);
+});
+
+test("runWkd exits 0 for a matching pair and 1 for a differing one", async (t) => {
+  const gh = github({ releases: R, onMain: ["v0.7.0", "v0.7.1"], keys: { "v0.7.1": K0 } });
+  const ok = await wkdRun(wkdDir(t, K0), gh.get);
+  assert.equal(ok.status, 0);
+  assert.equal(ok.lines.at(-1), "site-check: ok (wkd)");
+  const bad = await wkdRun(wkdDir(t, K1), gh.get);
+  assert.equal(bad.status, 1);
+  assert.match(bad.lines[0], /^site-check: error\[NRV-E1162\]: .*differs/);
+});
+
+test("the E1162 line for a differing key is pinned", (t) => {
+  const [e] = checkWkd(wkdDir(t, Buffer.from("other")), { tag: "v0.7.1", key: Buffer.from("key") });
+  assert.equal(e, "error[NRV-E1162]: the WKD key file differs from packaging/keys/nerva-release.asc at v0.7.1; open a site pull request with the gpg --dearmor of packaging/keys/nerva-release.asc at that tag");
+});
+
+test("--tree prints the pinned NRV-E1152 line", (t) => {
+  const d = siteDir(t);
+  writeFileSync(join(d, "package.json"), "{}");
+  const r = spawnSync(process.execPath, [SCRIPT, "--tree", d], { encoding: "utf8" });
+  assert.equal(r.status, 1);
+  assert.match(r.stdout.split("\n")[0], /^site-check: error\[NRV-E1152\]: site build: .+; nothing is deployed$/);
+});
+
+test("the reference is never named by the pull request: --wkd takes no tag", () => {
+  const r = spawnSync(process.execPath, [SCRIPT, "--wkd", ".", "v0.7.1"], { encoding: "utf8" });
+  assert.equal(r.status, 2);
 });

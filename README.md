@@ -1,10 +1,17 @@
 # nervalog.github.io
 
-The site for [Nerva](https://github.com/NervaLog/nerva), served at <https://nervalog.github.io/>.
+The site for [Nerva](https://github.com/NervaLog/nerva), served at <https://nerva.pro/>.
 
-`index.html` is the whole site: a static page with no build step. GitHub Pages serves this
-repository's `main` branch from its root, so a push to `main` is a deploy. `.nojekyll` turns off
-Jekyll.
+`index.html` is the whole site: a static page with no build step of its own. It is published as a
+Cloudflare Worker of static assets (P410): a push to `main` is a deploy, and the Worker's build
+copies only `index.html`, `404.html`, `_headers` and `.well-known`.
+
+The page carries no signing key and no fingerprint; it links to Nerva's `docs/INSTALL.md`. The key
+is only at its WKD path, `.well-known/openpgpkey/hu/ndqm47zydhyqyzabecddtdk1q3bponab` with an empty
+`policy` beside it: a copy of Nerva's `packaging/keys/nerva-release.asc` (NRV-E1162).
+
+The build refuses `functions/`, `_worker.js`, `_routes.json`, `wrangler.*` and every name off its
+allow-list (NRV-E1152); `site-check` refuses the same names in a pull request.
 
 ## Status
 

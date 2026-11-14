@@ -26,21 +26,44 @@ jobs:
       - name: The page parses and its data is well formed
         run: node .github/scripts/site_check.mjs index.html
 
-      # The Pages build command copies exactly these three files and refuses the build without
-      # them (NRV-E1152, docs/releases/packages.md in NervaLog/nerva).
+      # The Worker build copies exactly these three files and refuses the build without them
+      # (NRV-E1152, docs/releases/packages.md in NervaLog/nerva).
       - name: index.html, 404.html and _headers are regular files
         run: node .github/scripts/site_check.mjs --files .
+
+      # Every name the build refuses, and one WKD file without the other (NRV-E1152).
+      - name: The tree holds only names the build allows
+        run: node .github/scripts/site_check.mjs --tree .
+
+      # The WKD pair is Nerva's key file at the newest published v* tag on main, found by the checker
+      # from Nerva's release data, never named by the pull request (NRV-E1162).
+      - name: The WKD key is Nerva's key file
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: node .github/scripts/site_check.mjs --wkd .
 
       # HEAD is the merge commit: HEAD^1 is the base it merges into. Under `pull_request` this
       # workflow and the checker come from the PR itself, so a PR that edits them checks itself.
       # This step refuses the one combination that matters: changing .github/ and the release data
       # (a RELEASES entry or SITE.version, released, updated) together. The owner's ruleset should
-      # also require review for changes under .github/ (CODEOWNERS), which this step cannot do.
+      # also require review for changes under .github/; that ruleset rule is not set up yet. Both guard
+      # steps live in this file, so a pull request that edits check.yml can delete them with the
+      # change they guard: they catch accidents only, and the owner's review of .github/ is the control.
       - name: A pull request does not change its own checker and the release data
         run: |
           if git diff --name-only HEAD^1 HEAD | grep -q '^\.github/' &&
              git diff -U0 HEAD^1 HEAD -- index.html | grep -Eq '^[+-](  (version|released|updated): |  \{v:"|const RELEASES)'; then
             echo "site-check: a pull request that changes .github/ must not also change the release data in index.html"
+            exit 1
+          fi
+
+      # Nor may a pull request change the checker and the WKD key it checks: it would pass its own
+      # check. A release that carries the WKD pair (and no .github/) is fine.
+      - name: A pull request does not change its own checker and the WKD key
+        run: |
+          changed=$(git diff --name-only HEAD^1 HEAD)
+          if printf '%s\n' "$changed" | grep -q '^\.github/' && printf '%s\n' "$changed" | grep -q '^\.well-known/'; then
+            echo "site-check: a pull request that changes .github/ must not also change .well-known/"
             exit 1
           fi
 
