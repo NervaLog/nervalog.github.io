@@ -292,8 +292,8 @@ const SITE = {
   repo: "https://github.com/NervaLog/nerva",
   version: "0.7.1",
   released: "2026-11-15",
-  stage: "Research · v0.7.0 released · v0.7.1 alpha in progress",
-  stageStatus: "wip", // the header pill: "done" | "wip" | "plan"
+  stage: "Research · v0.7.1 released",
+  stageStatus: "plan", // the header pill: "done" | "wip" | "plan"
 };
 const BLOB = SITE.repo + "/blob/main/";
 const TUTORIAL = BLOB + "docs/TUTORIAL.md";
@@ -343,7 +343,6 @@ const GOALS = [
 ];
 // "Coming next", from README.md's Roadmap and docs/GOALS-1.0.md; ref is a goal id or roadmap item.
 const NEXT = [
-  {ref:"v0.7.1", t:"Alpha: the first release for outside users", status:"wip", d:"The candidate soaks in the simulator fleet and nightly Jepsen on a frozen commit; a universal macOS binary signed and notarized in CI, with a Homebrew tap; a Linux tarball with install.sh and systemd units, and .deb and .rpm packages; docs written for someone who is not us."},
   {ref:"v0.7.2", t:"Packages you can update", status:"plan", d:"apt and dnf repositories with signed packages, and the fixes held during the v0.7.1 freeze, security fixes among them."},
   {ref:"v0.8", t:"Proven and upgradable", status:"plan", d:"R1 Jepsen nightly and R2 the fleet delivered on their own host; R6 rolling upgrades through multiversion binaries; R3 sizing and latency on three machines; a tutorial that builds a small application on Nerva."},
   {ref:"v0.9", t:"Bounded", status:"plan", d:"R7 retention: history and view versions trimmed below a declared horizon; commit keys and facts are kept. Index reads as of a past op, group_by on bytes fields, and view snapshots."},
